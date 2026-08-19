@@ -1,6 +1,6 @@
 # Discord Spam Image Detector
 
-A Discord bot for a single large guild. It perceptual-hashes incoming images, compares them to a curated spam set, **auto-deletes** matches, and posts a staff alert with the evidence image attached.
+A Discord bot that perceptual-hashes incoming images, compares them to a curated spam set, **auto-deletes** matches, and posts a staff alert with the evidence image attached. Invite it to as many servers as you want; each server picks its own alert channel with `/spam alerts`.
 
 Kick/ban is not wired yet. Alerts include a disabled Kick placeholder for that later work.
 
@@ -14,10 +14,8 @@ Exact file hashes miss Discord’s re-encode, compress, and WebP conversion. Thi
 4. Open **OAuth2 → URL Generator**:
    - Scopes: `bot`, `applications.commands`
    - Permissions: View Channels, Read Message History, Send Messages, Embed Links, Attach Files, **Manage Messages**
-5. Invite the bot with the generated URL.
-6. Enable Developer Mode in Discord, then copy:
-   - Server ID → `GUILD_ID`
-   - Staff alert channel ID → `ALERT_CHANNEL_ID`
+5. Invite the bot with the generated URL (repeat for each server).
+6. In Discord, run `/spam alerts` and choose the staff channel for detection notices.
 
 ## Run locally (Windows)
 
@@ -26,7 +24,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 Copy-Item .env.example .env
-# Edit .env: DISCORD_TOKEN, GUILD_ID, ALERT_CHANNEL_ID
+# Edit .env: DISCORD_TOKEN
 python -m spam_detector
 ```
 
@@ -37,17 +35,24 @@ $env:PYTHONPATH = "src"
 python -m spam_detector
 ```
 
-## Spam image set
+## Spam image sets
 
-Drop PNG/JPEG/WebP/GIF files into `data/spam_images/` and run `/spam reload`, or add them in Discord:
+Each server has its own hash set. Drop PNG/JPEG/WebP/GIF files into that server’s folder under `data/guilds/<guild_id>/spam_images/` and run `/spam reload`, or add them in Discord:
 
-- `/spam add` — attach an image; stored and hashed
-- `/spam remove` — remove by name
-- `/spam list` — show the current set
-- `/spam reload` — re-hash everything in `data/spam_images/`
-- `/spam status` — hash count, threshold, uptime
+- `/spam add` — attach an image; stored for **this server**
+- `/spam remove` — remove by name from this server
+- `/spam list` — show this server’s set with image previews
+- `/spam reload` — re-hash this server’s files
+- `/spam alerts` — set this server’s staff alert channel
+- `/spam status` — this server’s count, global count, threshold, alert channel, uptime
 
-Commands require **Manage Server**, or the optional `ADMIN_ROLE_ID`.
+The application owner (you) can also maintain a **global** set that matches in every server:
+
+- `/spam global add` / `remove` / `list` / `reload`
+
+Those global files live in `data/spam_images/` (existing images there stay global). Per-server files are under `data/guilds/`.
+
+Server commands require **Manage Server**, or the optional `ADMIN_ROLE_ID`. Global commands require the Discord application owner.
 
 ## Matching
 

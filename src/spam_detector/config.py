@@ -27,8 +27,6 @@ def _optional_int(name: str) -> int | None:
 @dataclass(frozen=True)
 class Config:
     token: str
-    guild_id: int
-    alert_channel_id: int
     hash_threshold: int = 10
     hash_size: int = 8
     max_image_bytes: int = 10 * 1024 * 1024
@@ -46,6 +44,14 @@ class Config:
     def hashes_path(self) -> Path:
         return self.data_dir / "hashes.json"
 
+    @property
+    def guilds_dir(self) -> Path:
+        return self.data_dir / "guilds"
+
+    @property
+    def guild_settings_path(self) -> Path:
+        return self.data_dir / "guild_settings.json"
+
     @classmethod
     def from_env(cls, dotenv_path: Path | None = None) -> Config:
         load_dotenv(dotenv_path or REPO_ROOT / ".env")
@@ -53,8 +59,6 @@ class Config:
         data_dir = Path(data_dir_raw) if data_dir_raw else DEFAULT_DATA_DIR
         return cls(
             token=_require("DISCORD_TOKEN"),
-            guild_id=int(_require("GUILD_ID")),
-            alert_channel_id=int(_require("ALERT_CHANNEL_ID")),
             hash_threshold=int(os.getenv("HASH_THRESHOLD", "10")),
             hash_size=int(os.getenv("HASH_SIZE", "8")),
             max_image_bytes=int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024))),

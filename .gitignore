@@ -10,5 +10,7 @@ build/
 .ruff_cache/
 .env
 data/hashes.json
+data/guild_settings.json
+data/guilds/
 data/spam_images/*
 !data/spam_images/.gitkeep

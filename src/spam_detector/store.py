@@ -28,6 +28,7 @@ class HashEntry:
 class Match:
     entry: HashEntry
     distance: int
+    pool: str = "server"
 
 
 class HashStore:
@@ -62,7 +63,7 @@ class HashStore:
             for item in raw_entries
             if isinstance(item, dict) and {"id", "name", "filename", "phash"} <= item.keys()
         ]
-        log.info("Loaded %s spam hashes", len(self.entries))
+        log.info("Loaded %s spam hashes from %s", len(self.entries), self.hashes_path)
 
     def save(self) -> None:
         self.ensure_dirs()
@@ -140,6 +141,46 @@ class HashStore:
         return len(self.entries)
 
 
+class StoreManager:
+    def __init__(self, data_dir: Path) -> None:
+        self.data_dir = data_dir
+        self.global_store = HashStore(data_dir / "hashes.json", data_dir / "spam_images")
+        self._guild_stores: dict[int, HashStore] = {}
+
+    def load(self) -> None:
+        self.global_store.load()
+        guilds_dir = self.data_dir / "guilds"
+        if not guilds_dir.is_dir():
+            return
+        for child in guilds_dir.iterdir():
+            if child.is_dir() and child.name.isdigit():
+                self.guild_store(int(child.name))
+
+    def guild_store(self, guild_id: int) -> HashStore:
+        store = self._guild_stores.get(guild_id)
+        if store is None:
+            root = self.data_dir / "guilds" / str(guild_id)
+            store = HashStore(root / "hashes.json", root / "spam_images")
+            store.load()
+            self._guild_stores[guild_id] = store
+        return store
+
+    def has_hashes(self, guild_id: int) -> bool:
+        return bool(self.global_store.entries or self.guild_store(guild_id).entries)
+
+    def closest(self, guild_id: int, phash: str) -> Match | None:
+        matches: list[Match] = []
+        local = self.guild_store(guild_id).closest(phash)
+        if local is not None:
+            matches.append(Match(entry=local.entry, distance=local.distance, pool="server"))
+        shared = self.global_store.closest(phash)
+        if shared is not None:
+            matches.append(Match(entry=shared.entry, distance=shared.distance, pool="global"))
+        if not matches:
+            return None
+        return min(matches, key=lambda item: (item.distance, 0 if item.pool == "server" else 1))
+
+
 def sanitize_filename(name: str) -> str:
     cleaned = _UNSAFE_NAME.sub("_", Path(name).name).strip("._")
     return cleaned or "spam.png"
@@ -154,6 +195,54 @@ def unique_filename(directory: Path, filename: str) -> str:
         candidate = f"{stem}_{index}{suffix}"
         index += 1
     return candidate
+
+
+class GuildSettingsStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._alert_channels: dict[int, int] = {}
+
+    def load(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            self._alert_channels = {}
+            return
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            log.exception("Failed to read guild settings at %s", self.path)
+            self._alert_channels = {}
+            return
+        raw_guilds = payload.get("guilds", {}) if isinstance(payload, dict) else {}
+        alert_channels: dict[int, int] = {}
+        if isinstance(raw_guilds, dict):
+            for guild_id, settings in raw_guilds.items():
+                if not isinstance(settings, dict):
+                    continue
+                channel_id = settings.get("alert_channel_id")
+                try:
+                    alert_channels[int(guild_id)] = int(channel_id)
+                except (TypeError, ValueError):
+                    continue
+        self._alert_channels = alert_channels
+        log.info("Loaded settings for %s guild(s)", len(self._alert_channels))
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "guilds": {
+                str(guild_id): {"alert_channel_id": channel_id}
+                for guild_id, channel_id in sorted(self._alert_channels.items())
+            }
+        }
+        self.path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    def get_alert_channel_id(self, guild_id: int) -> int | None:
+        return self._alert_channels.get(guild_id)
+
+    def set_alert_channel_id(self, guild_id: int, channel_id: int) -> None:
+        self._alert_channels[guild_id] = channel_id
+        self.save()
 
 
 def _new_id(used: set[str]) -> str:

@@ -69,3 +69,11 @@ def image_from_bytes(data: bytes, max_pixels: int) -> Image.Image:
             raise InvalidImageError(str(exc)) from exc
         finally:
             Image.MAX_IMAGE_PIXELS = previous
+
+
+def jpeg_thumbnail(data: bytes, max_pixels: int, max_side: int = 320) -> bytes:
+    image = image_from_bytes(data, max_pixels)
+    image.thumbnail((max_side, max_side))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()

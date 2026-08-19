@@ -8,18 +8,23 @@ from spam_detector.cogs.scanner import ScannerCog
 from spam_detector.store import HashEntry, sanitize_filename
 
 
-def _bot(*, entries: bool = True) -> MagicMock:
+def _bot(*, entries: bool = True, global_entries: bool = False, alert_channel_id: int | None = 200) -> MagicMock:
     bot = MagicMock()
-    bot.config.guild_id = 100
-    bot.config.alert_channel_id = 200
     bot.config.download_concurrency = 2
     bot.user = SimpleNamespace(id=1)
-    bot.store.entries = (
+    guild_entries = (
         [HashEntry(id="abc", name="scam", filename="scam.png", phash="ffff")]
         if entries
         else []
     )
+    shared_entries = (
+        [HashEntry(id="g1", name="global-scam", filename="global.png", phash="aaaa")]
+        if global_entries
+        else []
+    )
+    bot.stores.has_hashes.side_effect = lambda _guild_id: bool(guild_entries or shared_entries)
     bot.http_session = None
+    bot.guild_settings.get_alert_channel_id.side_effect = lambda _guild_id: alert_channel_id
     return bot
 
 
@@ -49,9 +54,9 @@ def test_skips_dms() -> None:
     assert cog._should_scan(_message(guild_id=None)) is False
 
 
-def test_skips_other_guild() -> None:
+def test_scans_any_guild() -> None:
     cog = ScannerCog(_bot())
-    assert cog._should_scan(_message(guild_id=999)) is False
+    assert cog._should_scan(_message(guild_id=999)) is True
 
 
 def test_skips_alert_channel() -> None:
@@ -59,6 +64,11 @@ def test_skips_alert_channel() -> None:
     message = _message(channel_id=200)
     assert cog._should_scan(message) is False
     assert cog._skip_reason(message) == "posted in the alert channel"
+
+
+def test_scans_when_alert_channel_unset() -> None:
+    cog = ScannerCog(_bot(alert_channel_id=None))
+    assert cog._should_scan(_message(channel_id=200)) is True
 
 
 def test_skips_bots_and_self() -> None:
@@ -70,6 +80,8 @@ def test_skips_bots_and_self() -> None:
 def test_skips_empty_store_and_no_media() -> None:
     cog = ScannerCog(_bot(entries=False))
     assert cog._should_scan(_message()) is False
+    cog = ScannerCog(_bot(entries=False, global_entries=True))
+    assert cog._should_scan(_message()) is True
     cog = ScannerCog(_bot())
     assert cog._should_scan(_message(has_media=False)) is False
 

@@ -50,9 +50,8 @@ class ScannerCog(commands.Cog):
     def _skip_reason(self, message: discord.Message) -> str | None:
         if message.guild is None:
             return "not in a guild"
-        if message.guild.id != self.bot.config.guild_id:
-            return f"wrong guild ({message.guild.id})"
-        if message.channel.id == self.bot.config.alert_channel_id:
+        alert_channel_id = self.bot.guild_settings.get_alert_channel_id(message.guild.id)
+        if alert_channel_id is not None and message.channel.id == alert_channel_id:
             return "posted in the alert channel"
         if self.bot.user and message.author.id == self.bot.user.id:
             return "own message"
@@ -60,7 +59,7 @@ class ScannerCog(commands.Cog):
             return "author is a bot"
         if not message.attachments and not message.embeds and not _message_snapshots(message):
             return "no attachments or embeds"
-        if not self.bot.store.entries:
+        if not self.bot.stores.has_hashes(message.guild.id):
             return "spam hash set is empty"
         return None
 
@@ -147,7 +146,7 @@ class ScannerCog(commands.Cog):
             except Exception:
                 log.exception("Hash failed for %s", candidate.filename)
                 continue
-            nearest = self.bot.store.closest(phash)
+            nearest = self.bot.stores.closest(message.guild.id, phash)
             if nearest is None:
                 continue
             if closest is None or nearest.distance < closest.distance:
@@ -239,11 +238,19 @@ class ScannerCog(commands.Cog):
             return None
 
     async def _send_alert(self, message: discord.Message, hit: _Hit) -> None:
-        channel = message.guild.get_channel(self.bot.config.alert_channel_id) if message.guild else None
-        if channel is None:
-            channel = self.bot.get_channel(self.bot.config.alert_channel_id)
+        if message.guild is None:
+            return
+        alert_channel_id = self.bot.guild_settings.get_alert_channel_id(message.guild.id)
+        if alert_channel_id is None:
+            log.error(
+                "No alert channel set for guild %s (%s). Use /spam alerts in that server.",
+                message.guild.name,
+                message.guild.id,
+            )
+            return
+        channel = message.guild.get_channel(alert_channel_id) or self.bot.get_channel(alert_channel_id)
         if not isinstance(channel, discord.abc.Messageable):
-            log.error("Alert channel %s is missing or not messageable", self.bot.config.alert_channel_id)
+            log.error("Alert channel %s is missing or not messageable", alert_channel_id)
             return
 
         author = message.author
@@ -264,9 +271,10 @@ class ScannerCog(commands.Cog):
             inline=True,
         )
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+        pool = "global" if hit.match.pool == "global" else "this server"
         embed.add_field(
             name="Match",
-            value=f"`{hit.match.entry.name}`\nHamming distance `{hit.match.distance}`",
+            value=f"`{hit.match.entry.name}` ({pool})\nHamming distance `{hit.match.distance}`",
             inline=True,
         )
         embed.add_field(name="Source", value=hit.candidate.source, inline=True)
