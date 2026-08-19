@@ -35,6 +35,46 @@ $env:PYTHONPATH = "src"
 python -m spam_detector
 ```
 
+## Run as a service (Linux)
+
+To keep the bot running after you close SSH (and after reboot), install it as a systemd service. Example unit at `/etc/systemd/system/spam-detector.service`:
+
+```ini
+[Unit]
+Description=Discord spam image detector bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/discord-spam-image-detector
+ExecStart=/root/discord-spam-image-detector/.venv/bin/python -m spam_detector
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now spam-detector
+```
+
+Do not also run `python -m spam_detector` in a shell while the service is active — Discord will drop one of the two sessions.
+
+```bash
+systemctl status spam-detector
+journalctl -u spam-detector -f
+systemctl restart spam-detector
+systemctl stop spam-detector
+```
+
 ## Spam image sets
 
 Each server has its own hash set. Drop PNG/JPEG/WebP/GIF files into that server’s folder under `data/guilds/<guild_id>/spam_images/` and run `/spam reload`, or add them in Discord:
