@@ -69,7 +69,7 @@ class HashStore:
         payload = {"entries": [asdict(entry) for entry in self.entries]}
         self.hashes_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    def find_match(self, phash: str, threshold: int) -> Match | None:
+    def closest(self, phash: str) -> Match | None:
         best: Match | None = None
         for entry in self.entries:
             try:
@@ -77,10 +77,14 @@ class HashStore:
             except ValueError:
                 log.warning("Skipping invalid stored hash for %s", entry.name)
                 continue
-            if distance > threshold:
-                continue
             if best is None or distance < best.distance:
                 best = Match(entry=entry, distance=distance)
+        return best
+
+    def find_match(self, phash: str, threshold: int) -> Match | None:
+        best = self.closest(phash)
+        if best is None or best.distance > threshold:
+            return None
         return best
 
     def add(self, name: str, filename: str, phash: str, data: bytes) -> HashEntry:

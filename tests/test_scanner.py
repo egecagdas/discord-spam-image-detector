@@ -56,7 +56,9 @@ def test_skips_other_guild() -> None:
 
 def test_skips_alert_channel() -> None:
     cog = ScannerCog(_bot())
-    assert cog._should_scan(_message(channel_id=200)) is False
+    message = _message(channel_id=200)
+    assert cog._should_scan(message) is False
+    assert cog._skip_reason(message) == "posted in the alert channel"
 
 
 def test_skips_bots_and_self() -> None:

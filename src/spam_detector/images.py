@@ -10,7 +10,7 @@ _IMAGE_LOCK = threading.Lock()
 
 ImageFile.LOAD_TRUNCATED_IMAGES = False
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"}
 IMAGE_CONTENT_TYPES = {
     "image/png",
     "image/jpeg",
@@ -18,6 +18,7 @@ IMAGE_CONTENT_TYPES = {
     "image/webp",
     "image/gif",
     "image/bmp",
+    "image/avif",
 }
 
 

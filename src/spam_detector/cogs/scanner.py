@@ -47,22 +47,25 @@ class ScannerCog(commands.Cog):
         self._download_sem = asyncio.Semaphore(bot.config.download_concurrency)
         self._handled: OrderedDict[int, None] = OrderedDict()
 
-    def _should_scan(self, message: discord.Message) -> bool:
+    def _skip_reason(self, message: discord.Message) -> str | None:
         if message.guild is None:
-            return False
+            return "not in a guild"
         if message.guild.id != self.bot.config.guild_id:
-            return False
+            return f"wrong guild ({message.guild.id})"
         if message.channel.id == self.bot.config.alert_channel_id:
-            return False
+            return "posted in the alert channel"
         if self.bot.user and message.author.id == self.bot.user.id:
-            return False
+            return "own message"
         if message.author.bot:
-            return False
-        if not message.attachments and not message.embeds:
-            return False
+            return "author is a bot"
+        if not message.attachments and not message.embeds and not _message_snapshots(message):
+            return "no attachments or embeds"
         if not self.bot.store.entries:
-            return False
-        return True
+            return "spam hash set is empty"
+        return None
+
+    def _should_scan(self, message: discord.Message) -> bool:
+        return self._skip_reason(message) is None
 
     def _mark_handled(self, message_id: int) -> bool:
         if message_id in self._handled:
@@ -81,16 +84,19 @@ class ScannerCog(commands.Cog):
         await self._handle(after)
 
     async def _handle(self, message: discord.Message) -> None:
-        if not self._should_scan(message):
+        reason = self._skip_reason(message)
+        if reason:
+            if message.attachments or message.embeds or _message_snapshots(message):
+                log.info("Not scanning message %s: %s", message.id, reason)
             return
         if message.id in self._handled:
             return
         try:
-            match = await self._find_match(message)
+            hit = await self._find_match(message)
         except Exception:
             log.exception("Failed scanning message %s", message.id)
             return
-        if match is None:
+        if hit is None:
             return
         if not self._mark_handled(message.id):
             return
@@ -98,11 +104,11 @@ class ScannerCog(commands.Cog):
             "Spam match: user=%s message=%s sample=%s distance=%s",
             message.author.id,
             message.id,
-            match.entry.name,
-            match.distance,
+            hit.match.entry.name,
+            hit.match.distance,
         )
         try:
-            await self._send_alert(message, match)
+            await self._send_alert(message, hit)
         except Exception:
             log.exception("Failed to send spam alert for message %s", message.id)
         try:
@@ -116,7 +122,17 @@ class ScannerCog(commands.Cog):
 
     async def _find_match(self, message: discord.Message) -> _Hit | None:
         candidates = await self._collect_candidates(message)
+        if not candidates:
+            log.info(
+                "Message %s had no downloadable images (%s attachment(s), %s embed(s))",
+                message.id,
+                len(message.attachments),
+                len(message.embeds),
+            )
+            return None
         best: _Hit | None = None
+        closest: Match | None = None
+        threshold = self.bot.config.hash_threshold
         for candidate in candidates:
             try:
                 phash = await asyncio.to_thread(
@@ -131,17 +147,40 @@ class ScannerCog(commands.Cog):
             except Exception:
                 log.exception("Hash failed for %s", candidate.filename)
                 continue
-            found = self.bot.store.find_match(phash, self.bot.config.hash_threshold)
-            if found is None:
+            nearest = self.bot.store.closest(phash)
+            if nearest is None:
                 continue
-            if best is None or found.distance < best.match.distance:
-                best = _Hit(candidate=candidate, match=found)
+            if closest is None or nearest.distance < closest.distance:
+                closest = nearest
+            if nearest.distance > threshold:
+                continue
+            if best is None or nearest.distance < best.match.distance:
+                best = _Hit(candidate=candidate, match=nearest)
+        if best is None:
+            if closest is None:
+                log.info("No spam match for message %s: hashing failed", message.id)
+            else:
+                log.info(
+                    "No spam match for message %s: closest `%s` distance=%s threshold=%s",
+                    message.id,
+                    closest.entry.name,
+                    closest.distance,
+                    threshold,
+                )
         return best
 
     async def _collect_candidates(self, message: discord.Message) -> list[ImageCandidate]:
         candidates: list[ImageCandidate] = []
-        for attachment in message.attachments:
+        attachments = list(message.attachments)
+        for snapshot in _message_snapshots(message):
+            attachments.extend(list(getattr(snapshot, "attachments", None) or []))
+        for attachment in attachments:
             if not _is_image_attachment(attachment):
+                log.info(
+                    "Skipping non-image attachment %s (%s)",
+                    attachment.filename,
+                    attachment.content_type,
+                )
                 continue
             if attachment.size and attachment.size > self.bot.config.max_image_bytes:
                 log.info("Skipping oversized attachment %s", attachment.filename)
@@ -245,7 +284,16 @@ class _Hit:
         self.match = match
 
 
+def _message_snapshots(message: discord.Message) -> list[object]:
+    snapshots = getattr(message, "message_snapshots", None)
+    if isinstance(snapshots, (list, tuple)):
+        return list(snapshots)
+    return []
+
+
 def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    if getattr(attachment, "width", None) and getattr(attachment, "height", None):
+        return True
     if is_image_content_type(attachment.content_type):
         return True
     return is_image_filename(attachment.filename)

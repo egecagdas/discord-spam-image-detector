@@ -24,6 +24,7 @@ def test_add_and_match_identical(tmp_path: Path) -> None:
     store.add("bars", "bars.png", phash, data)
 
     match = store.find_match(phash, threshold=10)
+    assert store.closest(phash) is not None
     assert match is not None
     assert match.entry.name == "bars"
     assert match.distance == 0

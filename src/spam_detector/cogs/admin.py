@@ -22,6 +22,44 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+WRONG_GUILD_MESSAGE = "This command can only be used in the configured server."
+MISSING_PERMISSION_MESSAGE = (
+    "You need Manage Server or the configured admin role to use this command."
+)
+
+
+def admin_check_failure_message(
+    interaction: discord.Interaction,
+    *,
+    configured_guild_id: int,
+    admin_role_id: int | None,
+    owner_id: int | None = None,
+) -> str | None:
+    """Return an error message if the user cannot run admin commands, else None."""
+    guild_id = interaction.guild_id
+    if guild_id is None or guild_id != configured_guild_id:
+        return WRONG_GUILD_MESSAGE
+
+    user = interaction.user
+    resolved_owner_id = owner_id
+    if resolved_owner_id is None and interaction.guild is not None:
+        resolved_owner_id = interaction.guild.owner_id
+    if resolved_owner_id is not None and resolved_owner_id == user.id:
+        return None
+
+    perms = interaction.permissions
+    if perms.administrator or perms.manage_guild:
+        return None
+
+    if isinstance(user, discord.Member):
+        guild_perms = user.guild_permissions
+        if guild_perms.administrator or guild_perms.manage_guild:
+            return None
+        if admin_role_id and user.get_role(admin_role_id):
+            return None
+
+    return MISSING_PERMISSION_MESSAGE
+
 
 class AdminCog(commands.Cog):
     spam = app_commands.Group(name="spam", description="Manage the spam image set")
@@ -30,15 +68,18 @@ class AdminCog(commands.Cog):
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None or interaction.guild.id != self.bot.config.guild_id:
-            return False
-        user = interaction.user
-        if not isinstance(user, discord.Member):
-            return False
-        if user.guild_permissions.manage_guild:
+        guild = interaction.guild or (
+            self.bot.get_guild(interaction.guild_id) if interaction.guild_id else None
+        )
+        message = admin_check_failure_message(
+            interaction,
+            configured_guild_id=self.bot.config.guild_id,
+            admin_role_id=self.bot.config.admin_role_id,
+            owner_id=guild.owner_id if guild is not None else None,
+        )
+        if message is None:
             return True
-        role_id = self.bot.config.admin_role_id
-        return bool(role_id and user.get_role(role_id))
+        raise app_commands.CheckFailure(message)
 
     async def cog_app_command_error(
         self,
@@ -46,7 +87,7 @@ class AdminCog(commands.Cog):
         error: app_commands.AppCommandError,
     ) -> None:
         if isinstance(error, app_commands.CheckFailure):
-            message = "You need Manage Server or the configured admin role to use this command."
+            message = str(error) or MISSING_PERMISSION_MESSAGE
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
             else:
@@ -176,6 +217,8 @@ class AdminCog(commands.Cog):
                     f"Hashes: **{len(self.bot.store.entries)}**",
                     f"Threshold: `{self.bot.config.hash_threshold}`",
                     f"Alert channel: <#{self.bot.config.alert_channel_id}>",
+                    f"Messages seen: **{self.bot.messages_seen}**",
+                    f"Last channel: {f'<#{self.bot.last_seen_channel_id}>' if self.bot.last_seen_channel_id else 'none'}",
                     f"Ready: {uptime}",
                 ]
             ),
@@ -184,6 +227,8 @@ class AdminCog(commands.Cog):
 
 
 def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    if getattr(attachment, "width", None) and getattr(attachment, "height", None):
+        return True
     if is_image_content_type(attachment.content_type):
         return True
     return is_image_filename(attachment.filename)
