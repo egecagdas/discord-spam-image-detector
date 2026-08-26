@@ -2,7 +2,7 @@
 
 **Effective date:** August 27, 2026  
 **Last updated:** August 27, 2026  
-**Contact:** **Replace this placeholder with a monitored email address before publishing.**
+**Contact:** **egecagdas.aladag@outlook.com**
 
 Discord Spam Image Detector ("the bot", "we", "us") is a Discord server-moderation bot that detects images matching a server's configured spam-image reference set. This policy describes how the bot processes information received through Discord.
 
