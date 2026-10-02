@@ -1,3 +1,8 @@
+---
+layout: default
+title: Privacy Policy
+---
+
 # Privacy Policy for Discord Spam Image Detector
 
 **Effective date:** August 27, 2026  
